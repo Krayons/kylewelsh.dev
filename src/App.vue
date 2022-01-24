@@ -22,7 +22,7 @@
         </p>
 
         <p class="py-6">Part of my new year's resolutions (2022) is to improve my writing, so I'll be publishing
-          one article a I gave myself January to setup this site :)</p>
+          one article a month. I gave myself January to setup this site :)</p>
 
         <!--/ Post Content-->
 

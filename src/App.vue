@@ -1,72 +1,61 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
 import Terminal from './components/Terminal.vue'
 </script>
 
 <template>
-  <div class="flex flex-col h-screen justify-between">
+  <main class="room">
+    <div class="stage">
+      <Terminal />
 
-    <!--Container-->
-    <div class="container w-full md:max-w-3xl mx-auto pt-20">
-
-      <div class="w-full px-4 md:px-6 text-xl text-gray-800 leading-normal" style="font-family:Georgia,serif;">
-
-        <!--Title-->
-        <div class="font-sans">
-          <h1 class="font-bold font-sans break-normal text-amber-50 pt-6 pb-2 text-3xl md:text-4xl">Welcome </h1>
-        </div>
-
-        <!--Post Content-->
-
-        <!--Lead Para-->
-        <p class="py-6 text-amber-50">
-          <terminal msg="Hello World!"></terminal>
-        </p>
-
-        <!--/ Post Content-->
-
+      <div class="statusbar">
+        <span class="seg on">● ONLINE</span>
+        <span class="seg">kyle welsh</span>
+        <span class="seg grow">the bits don't do what i want them to do</span>
+        <span class="seg">© 2026</span>
       </div>
     </div>
-    <!--/container-->
-
-    <footer class="bg-slate-400 border-t border-gray-400 shadow">
-      <div class="container max-w-4xl mx-auto flex py-8">
-
-        <div class="w-full mx-auto flex flex-wrap">
-          <div class="flex w-full md:w-1/2 ">
-            <div class="px-8">
-              <h3 class="font-bold text-gray-900">About</h3>
-              <p class="py-4 text-gray-600 text-sm">
-                The bits don't do what I want them to do.
-              </p>
-            </div>
-          </div>
-
-          <div class="flex w-full md:w-1/2">
-            <div class="px-8">
-              <h3 class="font-bold text-gray-900">Social</h3>
-              <ul class="list-reset items-center text-sm pt-3">
-                <li>
-                  <a target="_blank" class="inline-block text-gray-600 no-underline hover:text-gray-900 hover:text-underline py-1"
-                     href="https://x.com/kylewelshlive">Twitter</a>
-                </li>
-                <li>
-                  <a target="_blank" class="inline-block text-gray-600 no-underline hover:text-gray-900 hover:text-underline py-1"
-                     href="https://www.linkedin.com/in/kyle-ian-bransby-welsh/">LinkedIn</a>
-                </li>
-                <li>
-                  <a target="_blank" class="inline-block text-gray-600 no-underline hover:text-gray-900 hover:text-underline py-1"
-                     href="https://www.instagram.com/kylewelshlive/">Instagram</a>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </footer>
-
-  </div>
+  </main>
 </template>
 
-<style></style>
+<style scoped>
+.room {
+  position: relative;
+  z-index: 1;
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(16px, 4vw, 56px);
+}
+
+.stage {
+  width: 100%;
+  max-width: 920px;
+}
+
+.statusbar {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 1.6ch;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5d6360;
+}
+
+.seg.grow {
+  flex: 1;
+  min-width: 0;
+  color: #474c4a;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+.seg.on {
+  color: var(--color-phosphor-dim);
+  text-shadow: 0 0 8px rgba(77, 255, 149, 0.35);
+}
+</style>

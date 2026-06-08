@@ -1,22 +1,22 @@
 {
   "name": "kylewelsh.dev",
   "version": "0.0.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "typeit": "^8.8.3",
-    "vue": "^3.2.25"
+    "typeit": "^8.8.7",
+    "vue": "^3.5.35"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^2.0.0",
-    "autoprefixer": "^10.4.1",
-    "postcss": "^8.4.5",
-    "tailwindcss": "^3.0.8",
-    "typescript": "^4.4.4",
-    "vite": "^2.7.2",
-    "vue-tsc": "^0.29.8"
+    "@tailwindcss/vite": "^4.3.0",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vue-tsc": "^3.3.4"
   }
 }

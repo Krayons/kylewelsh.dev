@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import Terminal from './components/Terminal.vue'
+import Backdrop from './components/Backdrop.vue'
 </script>
 
 <template>
   <main class="room">
+    <Backdrop />
+
     <div class="stage">
       <Terminal />
 
@@ -11,6 +14,7 @@ import Terminal from './components/Terminal.vue'
         <span class="seg on">● ONLINE</span>
         <span class="seg">kyle welsh</span>
         <span class="seg grow">the bits don't do what i want them to do</span>
+        <span class="seg">cape town, za</span>
         <span class="seg">© 2026</span>
       </div>
     </div>
@@ -21,19 +25,34 @@ import Terminal from './components/Terminal.vue'
 .room {
   position: relative;
   z-index: 1;
-  min-height: 100svh;
+  height: 100svh;
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: clamp(16px, 4vw, 56px);
+  padding: clamp(12px, 3vw, 48px);
+  overflow: hidden;
 }
 
 .stage {
+  position: relative;
+  z-index: 1;
   width: 100%;
-  max-width: 920px;
+  max-width: 960px;
+  height: 100%;
+  max-height: 820px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* the monitor takes all height the statusbar doesn't need */
+.stage > :first-child {
+  flex: 1;
+  min-height: 0;
 }
 
 .statusbar {
+  flex: none;
   margin-top: 14px;
   display: flex;
   align-items: center;
@@ -57,5 +76,16 @@ import Terminal from './components/Terminal.vue'
 .seg.on {
   color: var(--color-phosphor-dim);
   text-shadow: 0 0 8px rgba(77, 255, 149, 0.35);
+}
+
+@media (max-width: 560px) {
+  .statusbar {
+    font-size: 10px;
+    gap: 1.2ch;
+  }
+
+  .seg.grow {
+    display: none;
+  }
 }
 </style>

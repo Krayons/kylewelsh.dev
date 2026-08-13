@@ -1,6 +1,16 @@
 <script setup lang="ts">
-import Terminal from './components/Terminal.vue'
+import { ref } from 'vue'
+import Terminal, { type PowerStatus } from './components/Terminal.vue'
 import Backdrop from './components/Backdrop.vue'
+
+const power = ref<PowerStatus>('standby')
+
+const POWER_LABEL: Record<PowerStatus, string> = {
+  standby: '○ STANDBY',
+  loading: '◐ LOADING',
+  online: '● ONLINE',
+  local: '● LOCAL',
+}
 </script>
 
 <template>
@@ -8,10 +18,12 @@ import Backdrop from './components/Backdrop.vue'
     <Backdrop />
 
     <div class="stage">
-      <Terminal />
+      <Terminal @status="power = $event" />
 
       <div class="statusbar">
-        <span class="seg on">● ONLINE</span>
+        <span class="seg" :class="{ on: power !== 'standby' }">{{
+          POWER_LABEL[power]
+        }}</span>
         <span class="seg">kyle welsh</span>
         <span class="seg grow">the bits don't do what i want them to do</span>
         <span class="seg">cape town, za</span>

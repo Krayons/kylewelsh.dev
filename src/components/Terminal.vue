@@ -1,23 +1,39 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import {
-  mountTerminal,
-  probeTerminalBackend,
-  attachPty,
-  type TerminalDisplay,
-  type PtyAttach,
-} from '../terminal/remoteSession'
+import { ref, nextTick, onBeforeUnmount } from 'vue'
+import { mountTerminal, type TerminalDisplay } from '../terminal/remoteSession'
 import { playIntro } from '../terminal/playIntro'
 import { attachLocalShell } from '../terminal/localXtermShell'
+import { attachV86, type V86Attach } from '../terminal/v86Session'
+import {
+  cachedV86Assets,
+  loadV86Assets,
+  type AssetProgress,
+  type V86Buffers,
+} from '../terminal/v86Assets'
+import LoadScreen from './LoadScreen.vue'
+
+export type PowerStatus = 'standby' | 'loading' | 'online' | 'local'
+
+const emit = defineEmits<{
+  status: [value: PowerStatus]
+}>()
 
 const powerCycles = ref(0)
+const status = ref<PowerStatus>('standby')
 const screenEl = ref<HTMLElement | null>(null)
 const xtermHostEl = ref<HTMLElement | null>(null)
 
+const loadFiles = ref<AssetProgress[]>([])
+const loadLoaded = ref(0)
+const loadTotal = ref(0)
+const loadPhase = ref<'download' | 'boot' | 'fail'>('download')
+const loadDetail = ref('')
+
 let cancelled = false
 let display: TerminalDisplay | null = null
-let pty: PtyAttach | null = null
+let guest: V86Attach | null = null
 let localShell: { dispose: () => void } | null = null
+let loadAbort: AbortController | null = null
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -30,77 +46,44 @@ const finePointer =
   typeof window !== 'undefined' &&
   window.matchMedia('(pointer: fine)').matches
 
+function setStatus(next: PowerStatus) {
+  status.value = next
+  emit('status', next)
+}
+
 function teardownSession() {
   localShell?.dispose()
   localShell = null
-  pty?.dispose()
-  pty = null
+  guest?.dispose()
+  guest = null
   display?.dispose()
   display = null
 }
 
 function onScreenClick() {
+  if (status.value === 'standby' || status.value === 'loading') return
   const sel = window.getSelection()
   if (sel && !sel.isCollapsed) return
   if (!finePointer && !display) return
   display?.focus()
 }
 
-/**
- * Start container attach in the background while the intro plays.
- * PTY output is buffered until goLive() so the shell prompt continues
- * the same stream the intro wrote.
- */
-function beginPreconnect(
-  healthPromise?: ReturnType<typeof probeTerminalBackend>,
-): { ready: Promise<boolean> } {
-  if (!display) return { ready: Promise.resolve(false) }
-
-  const ready = (async () => {
-    const health = await (healthPromise ?? probeTerminalBackend())
-    if (cancelled || !health.ok || !display) return false
-
-    const attach = attachPty({
-      display,
-      onDisconnected: () => {
-        if (cancelled || !display) return
-        // Stay on the same xterm — drop into local line editor
-        localShell?.dispose()
-        localShell = attachLocalShell(display.term, {
-          onReboot: () => {
-            void reboot()
-          },
-        })
-      },
-    })
-    pty = attach
-    try {
-      await attach.ready
-      return !cancelled
-    } catch {
-      attach.dispose()
-      if (pty === attach) pty = null
-      return false
-    }
-  })()
-
-  return { ready }
+function dropToLocal() {
+  if (!display) return
+  localShell?.dispose()
+  localShell = attachLocalShell(display.term, {
+    onReboot: () => {
+      void reboot()
+    },
+  })
+  setStatus('local')
+  if (finePointer) display.focus()
 }
 
-async function powerOn() {
-  cancelled = false
-  teardownSession()
-
-  // Health check starts during CRT settle so the container is often ready
-  // by the time the intro finishes — handoff is just goLive().
-  const earlyHealth = probeTerminalBackend()
-
-  await sleep(reduceMotion ? 0 : 900)
-  if (cancelled) return
-
+async function bootSession(assets: V86Buffers | null) {
   await nextTick()
   const host = xtermHostEl.value
-  if (!host) return
+  if (!host || cancelled) return
 
   try {
     display = await mountTerminal({
@@ -115,7 +98,24 @@ async function powerOn() {
     return
   }
 
-  const pre = beginPreconnect(earlyHealth)
+  let attach: V86Attach | null = null
+  if (assets) {
+    try {
+      attach = await attachV86({
+        display,
+        assets,
+        onDisconnected: () => {
+          if (cancelled || !display) return
+          dropToLocal()
+        },
+      })
+      guest = attach
+    } catch {
+      attach = null
+    }
+  }
+
+  setStatus(attach ? 'online' : 'local')
 
   await playIntro({
     display,
@@ -124,40 +124,98 @@ async function powerOn() {
   })
   if (cancelled) return
 
-  const ok = await pre.ready
-  if (cancelled) return
-
-  if (ok && pty) {
-    // Tiny beat so the last intro line settles, then PTY continues on-screen
+  if (attach && guest === attach) {
+    await attach.ready
+    if (cancelled) return
     await sleep(reduceMotion ? 0 : 120)
     if (cancelled) return
-    pty.goLive()
+    attach.goLive()
     if (finePointer) display.focus()
     return
   }
 
-  // Offline path: same xterm, local commands — no layout swap
-  localShell = attachLocalShell(display.term, {
-    onReboot: () => {
-      void reboot()
-    },
-  })
-  if (finePointer) display.focus()
+  dropToLocal()
+}
+
+async function powerOn() {
+  if (status.value !== 'standby') return
+  cancelled = false
+  loadPhase.value = 'download'
+  loadDetail.value = ''
+  loadFiles.value = []
+  setStatus('loading')
+
+  loadAbort = new AbortController()
+  const started = Date.now()
+  let assets: V86Buffers | null = cachedV86Assets()
+
+  try {
+    assets = await loadV86Assets({
+      signal: loadAbort.signal,
+      onProgress: (p) => {
+        loadFiles.value = p.files
+        loadLoaded.value = p.loaded
+        loadTotal.value = p.total
+      },
+    })
+  } catch (e) {
+    if (loadAbort.signal.aborted || cancelled) {
+      setStatus('standby')
+      return
+    }
+    loadPhase.value = 'fail'
+    loadDetail.value =
+      e instanceof Error ? e.message : 'system image missing'
+    await sleep(reduceMotion ? 400 : 1100)
+    assets = null
+  }
+
+  const elapsed = Date.now() - started
+  if (!reduceMotion && elapsed < 700) await sleep(700 - elapsed)
+  if (cancelled) {
+    setStatus('standby')
+    return
+  }
+
+  loadPhase.value = 'boot'
+  await sleep(reduceMotion ? 0 : 280)
+  if (cancelled) {
+    setStatus('standby')
+    return
+  }
+
+  await bootSession(assets)
+}
+
+async function powerOff() {
+  cancelled = true
+  loadAbort?.abort()
+  loadAbort = null
+  teardownSession()
+  powerCycles.value++
+  setStatus('standby')
+  loadPhase.value = 'download'
+  loadDetail.value = ''
+}
+
+function togglePower() {
+  if (status.value === 'standby') void powerOn()
+  else void powerOff()
 }
 
 async function reboot() {
+  if (status.value === 'standby' || status.value === 'loading') return
   cancelled = true
   teardownSession()
   powerCycles.value++
   await nextTick()
   cancelled = false
-  await powerOn()
+  await bootSession(cachedV86Assets())
 }
-
-onMounted(powerOn)
 
 onBeforeUnmount(() => {
   cancelled = true
+  loadAbort?.abort()
   teardownSession()
 })
 </script>
@@ -165,7 +223,12 @@ onBeforeUnmount(() => {
 <template>
   <div id="monitor">
     <div id="bezel">
-      <div class="crt" :key="powerCycles" @click="onScreenClick">
+      <div
+        class="crt"
+        :class="{ standby: status === 'standby' }"
+        :key="powerCycles"
+        @click="onScreenClick"
+      >
         <div class="scanline" aria-hidden="true"></div>
         <div class="vignette" aria-hidden="true"></div>
 
@@ -173,13 +236,36 @@ onBeforeUnmount(() => {
           <div
             ref="xtermHostEl"
             class="xterm-host"
+            :class="{ dimmed: status === 'loading' }"
             aria-label="terminal"
           ></div>
+          <LoadScreen
+            v-if="status === 'loading'"
+            :files="loadFiles"
+            :loaded="loadLoaded"
+            :total="loadTotal"
+            :phase="loadPhase"
+            :detail="loadDetail"
+          />
         </div>
       </div>
 
+      <button
+        type="button"
+        class="power"
+        :class="{ on: status !== 'standby' }"
+        :aria-pressed="status !== 'standby'"
+        :aria-label="status === 'standby' ? 'Power on' : 'Power off'"
+        @click.stop="togglePower"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4.5v8" />
+          <path d="M8.15 7.6a6.1 6.1 0 1 0 7.7 0" />
+        </svg>
+      </button>
+
       <div class="badge" aria-hidden="true">
-        <span class="led"></span>
+        <span class="led" :class="status"></span>
         <span class="brand">PHOSPHOR&nbsp;TC&minus;88</span>
       </div>
     </div>
@@ -231,6 +317,13 @@ onBeforeUnmount(() => {
   cursor: text;
 }
 
+.crt.standby {
+  animation: none;
+  cursor: default;
+  background: radial-gradient(120% 80% at 50% 40%, #070b09 0%, #030403 70%, #010201 100%);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.95);
+}
+
 .screen {
   position: relative;
   z-index: 1;
@@ -253,6 +346,10 @@ onBeforeUnmount(() => {
   position: relative;
   color: var(--color-phosphor);
   text-shadow: none;
+}
+
+.xterm-host.dimmed {
+  opacity: 0;
 }
 
 .xterm-host :deep(.xterm) {
@@ -289,6 +386,11 @@ onBeforeUnmount(() => {
   animation: sweep 7.5s linear infinite;
 }
 
+.crt.standby .scanline,
+.crt.standby .vignette {
+  opacity: 0;
+}
+
 .crt::before {
   content: '';
   position: absolute;
@@ -300,6 +402,11 @@ onBeforeUnmount(() => {
     linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.05));
   background-size: 100% 3px, 4px 100%;
   mix-blend-mode: overlay;
+}
+
+.crt.standby::before,
+.crt.standby::after {
+  opacity: 0;
 }
 
 .crt::after {
@@ -323,6 +430,62 @@ onBeforeUnmount(() => {
   border-radius: 14px;
 }
 
+.power {
+  position: absolute;
+  left: 26px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #6a706c;
+  background:
+    radial-gradient(circle at 35% 30%, #3a3e3c 0%, #1c1e1d 62%, #0e0f0e 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 2px 3px rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  transition:
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.power svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+}
+
+.power:hover {
+  color: #9aa39c;
+}
+
+.power.on {
+  color: var(--color-phosphor);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 10px rgba(77, 255, 149, 0.35);
+}
+
+.power:not(.on) {
+  animation: powerHint 2.8s ease-in-out infinite;
+}
+
+.power:focus-visible {
+  outline: 1px solid var(--color-phosphor-dim);
+  outline-offset: 3px;
+}
+
 .badge {
   position: absolute;
   right: 26px;
@@ -342,6 +505,17 @@ onBeforeUnmount(() => {
   background: var(--color-phosphor);
   box-shadow: 0 0 8px 1px rgba(77, 255, 149, 0.8);
   animation: ledPulse 3.5s ease-in-out infinite;
+}
+
+.led.standby {
+  background: #4a2a22;
+  box-shadow: none;
+  animation: none;
+}
+
+.led.loading {
+  background: #ffb15a;
+  box-shadow: 0 0 8px 1px rgba(255, 177, 90, 0.7);
 }
 
 @keyframes turnOn {
@@ -394,13 +568,34 @@ onBeforeUnmount(() => {
   }
 }
 
+@keyframes powerHint {
+  0%,
+  100% {
+    color: #6a706c;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.7),
+      0 0 0 1px rgba(0, 0, 0, 0.55),
+      0 2px 3px rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    color: #8d9a90;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -2px 3px rgba(0, 0, 0, 0.7),
+      0 0 0 1px rgba(0, 0, 0, 0.55),
+      0 0 8px rgba(77, 255, 149, 0.18);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .crt {
     animation: none;
   }
   .scanline,
   .crt::after,
-  .led {
+  .led,
+  .power:not(.on) {
     animation: none;
   }
 }

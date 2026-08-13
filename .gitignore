@@ -105,3 +105,8 @@ dist
 
 # macOS
 .DS_Store
+
+# v86 guest images (scripts/fetch-v86-assets.mjs)
+public/v86/*.bin
+public/v86/*.wasm
+public/v86/*.tmp

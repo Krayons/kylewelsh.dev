@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_TERM_WS_URL?: string
   /** HTTP base for health checks, e.g. https://term.kylewelsh.dev */
   readonly VITE_TERM_HTTP_URL?: string
+  /** v86 ethernet relay (wsproxy). Default: wss://relay.widgetry.org/ */
+  readonly VITE_V86_RELAY_URL?: string
 }
 
 interface ImportMeta {

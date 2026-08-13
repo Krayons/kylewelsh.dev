@@ -1,14 +1,25 @@
 {
   "name": "kylewelsh.dev",
   "version": "0.0.0",
+  "private": true,
   "type": "module",
+  "workspaces": [
+    "server"
+  ],
   "scripts": {
+    "postinstall": "node scripts/fix-node-pty.mjs",
     "dev": "vite",
+    "dev:server": "npm run dev -w @kylewelsh.dev/server",
+    "dev:all": "npm run dev & npm run dev:server",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build:server": "npm run build -w @kylewelsh.dev/server",
+    "preview": "vite preview",
+    "start:server": "npm run start -w @kylewelsh.dev/server"
   },
   "dependencies": {
-    "typeit": "^8.8.7",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
     "vue": "^3.5.35"
   },
   "devDependencies": {
